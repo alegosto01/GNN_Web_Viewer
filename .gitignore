@@ -1,0 +1,21 @@
+# python
+__pycache__/
+*.pyc
+
+# environments
+.env
+.venv
+env/
+wsi_viewer/
+
+# large data
+data/
+*.svs
+*.pt
+*.geojson
+
+# jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
