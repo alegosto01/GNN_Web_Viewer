@@ -21,10 +21,17 @@ let patchMapZoom = null;
 let annotationGeoJSON = null;
 let patchMapViewState = null;
 
+let allCases = [];
 const CELL_SIZE = 14;
 const CELL_GAP = 0;
 
 async function init() {
+    allCases = await fetch("/cases").then(r => r.json());
+    populateCaseSelector(allCases);
+
+    const currentCase = await fetch("/current_case").then(r => r.json());
+    document.getElementById("case-select").value = currentCase.wsi;
+    renderCaseMeta(currentCase);
     const slideInfo = await fetch("/slide_info").then(r => r.json());
     slideWidth = slideInfo.width;
     slideHeight = slideInfo.height;
@@ -281,22 +288,22 @@ async function selectPatch(patchId) {
     const patch = allPatches.find(p => Number(p.patch_id) === Number(patchId));
     if (!patch) return;
 
-    updatePatchInfo(patchId, similarities);
+    // updatePatchInfo(patchId, similarities);
     showPatchOnWSI(patch);
 }
 
-function updatePatchInfo(patchId, similarities) {
-    const selected = similarities.find(p => Number(p.patch_id) === Number(patchId));
-    const patchInfo = document.getElementById("patch-info");
+// function updatePatchInfo(patchId, similarities) {
+//     const selected = similarities.find(p => Number(p.patch_id) === Number(patchId));
+//     const patchInfo = document.getElementById("patch-info");
 
-    patchInfo.innerHTML = `
-        <strong>Selected patch:</strong> ${patchId}<br>
-        <strong>x:</strong> ${Math.round(selected.x)}<br>
-        <strong>y:</strong> ${Math.round(selected.y)}<br>
-        <strong>cluster:</strong> ${selected.cluster}<br>
-        <strong>self-similarity:</strong> ${Number(selected.score).toFixed(4)}
-    `;
-}
+//     patchInfo.innerHTML = `
+//         <strong>Selected patch:</strong> ${patchId}<br>
+//         <strong>x:</strong> ${Math.round(selected.x)}<br>
+//         <strong>y:</strong> ${Math.round(selected.y)}<br>
+//         <strong>cluster:</strong> ${selected.cluster}<br>
+//         <strong>self-similarity:</strong> ${Number(selected.score).toFixed(4)}
+//     `;
+// }
 
 function patchToRect(patch) {
     const x = patch.x / slideWidth;
@@ -330,6 +337,50 @@ function showPatchOnWSI(patch) {
     });
 
     selectedOverlay = overlay;
+}
+
+
+function populateCaseSelector(cases) {
+    const select = document.getElementById("case-select");
+    select.innerHTML = "";
+
+    cases.forEach(c => {
+        const opt = document.createElement("option");
+        opt.value = c.wsi;
+
+        const parts = [
+            c.wsi,
+            `project ${c.project ?? "-"}`,
+            `sex ${c.sex ?? "-"}`,
+            `age ${c.age ?? "-"}`,
+            `grade ${c.grade ?? "-"}`,
+            `stage ${c.stage ?? "-"}`,
+            `outcome ${c.outcome_class ?? "-"}`,
+            `kalimuthu ${c.kalimuthu_class ?? "-"}`
+        ];
+
+        opt.textContent = parts.join(" • ");
+        select.appendChild(opt);
+    });
+
+    select.addEventListener("change", async (e) => {
+        await switchCase(e.target.value);
+    });
+}
+function renderCaseMeta(meta) {
+    const el = document.getElementById("case-meta");
+    el.innerHTML = `
+        <span class="case-meta-item"><strong>WSI:</strong> ${meta.wsi ?? "-"}</span>
+        <span class="case-meta-item"><strong>Project:</strong> ${meta.project ?? "-"}</span>
+        <span class="case-meta-item"><strong>Sex:</strong> ${meta.sex ?? "-"}</span>
+        <span class="case-meta-item"><strong>Age:</strong> ${meta.age ?? "-"}</span>
+        <span class="case-meta-item"><strong>Age group:</strong> ${meta.age_group ?? "-"}</span>
+        <span class="case-meta-item"><strong>Grade:</strong> ${meta.grade ?? "-"}</span>
+        <span class="case-meta-item"><strong>Stage:</strong> ${meta.stage ?? "-"}</span>
+        <span class="case-meta-item"><strong>Survival:</strong> ${meta.survival_days ?? "-"}</span>
+        <span class="case-meta-item"><strong>Outcome:</strong> ${meta.outcome_class ?? "-"}</span>
+        <span class="case-meta-item"><strong>Kalimuthu:</strong> ${meta.kalimuthu_class ?? "-"}</span>
+    `;
 }
 
 function similarityToViridis(value, minValue, maxValue) {
@@ -372,30 +423,32 @@ function renderColorbar(minScore, maxScore) {
     const svg = document.getElementById("colorbar");
     svg.innerHTML = "";
 
-    const width = 60;
-    const height = 320;
-    const barX = 10;
-    const barY = 20;
-    const barWidth = 20;
-    const barHeight = 260;
+    const width = 700;
+    const height = 80;
+
+    const barX = 55;
+    const barY = 24;
+    const barWidth = 600;
+    const barHeight = 16;
 
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("preserveAspectRatio", "none");
 
-    // gradient definition
     const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
     const gradient = document.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
+
     gradient.setAttribute("id", "colorbar-gradient");
     gradient.setAttribute("x1", "0%");
-    gradient.setAttribute("y1", "100%");
-    gradient.setAttribute("x2", "0%");
+    gradient.setAttribute("y1", "0%");
+    gradient.setAttribute("x2", "100%");
     gradient.setAttribute("y2", "0%");
 
     const stops = [
-        { offset: "0%", color: "rgb(68, 1, 84)" },
-        { offset: "25%", color: "rgb(59, 82, 139)" },
-        { offset: "50%", color: "rgb(33, 145, 140)" },
-        { offset: "75%", color: "rgb(94, 201, 98)" },
-        { offset: "100%", color: "rgb(253, 231, 37)" }
+        { offset: "0%", color: "rgb(68,1,84)" },
+        { offset: "25%", color: "rgb(59,82,139)" },
+        { offset: "50%", color: "rgb(33,145,140)" },
+        { offset: "75%", color: "rgb(94,201,98)" },
+        { offset: "100%", color: "rgb(253,231,37)" }
     ];
 
     stops.forEach(s => {
@@ -415,48 +468,43 @@ function renderColorbar(minScore, maxScore) {
     rect.setAttribute("height", barHeight);
     rect.setAttribute("fill", "url(#colorbar-gradient)");
     rect.setAttribute("stroke", "black");
-    rect.setAttribute("stroke-width", "0.5");
+    rect.setAttribute("stroke-width", "0.8");
     svg.appendChild(rect);
 
-    if (minScore === null || maxScore === null) {
-        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        label.setAttribute("x", 5);
-        label.setAttribute("y", 15);
-        label.setAttribute("font-size", "7");
-        label.textContent = "No scale";
-        svg.appendChild(label);
-        return;
-    }
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    title.setAttribute("x", barX);
+    title.setAttribute("y", 14);
+    title.setAttribute("font-size", "14");
+    title.setAttribute("font-weight", "600");
+    title.textContent = "Cosine similarity";
+    svg.appendChild(title);
+
+    if (minScore === null || maxScore === null) return;
 
     const ticks = 5;
+
     for (let i = 0; i < ticks; i++) {
         const t = i / (ticks - 1);
-        const y = barY + barHeight - t * barHeight;
+        const x = barX + t * barWidth;
         const value = minScore + t * (maxScore - minScore);
 
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-        line.setAttribute("x1", barX + barWidth);
-        line.setAttribute("x2", barX + barWidth + 5);
-        line.setAttribute("y1", y);
-        line.setAttribute("y2", y);
+        line.setAttribute("x1", x);
+        line.setAttribute("x2", x);
+        line.setAttribute("y1", barY + barHeight);
+        line.setAttribute("y2", barY + barHeight + 8);
         line.setAttribute("stroke", "black");
-        line.setAttribute("stroke-width", "0.5");
+        line.setAttribute("stroke-width", "0.8");
         svg.appendChild(line);
 
-        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        text.setAttribute("x", barX + barWidth + 8);
-        text.setAttribute("y", y + 2);
-        text.setAttribute("font-size", "6");
-        text.textContent = value.toFixed(2);
-        svg.appendChild(text);
+        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        label.setAttribute("x", x);
+        label.setAttribute("y", barY + barHeight + 24);
+        label.setAttribute("text-anchor", "middle");
+        label.setAttribute("font-size", "12");
+        label.textContent = value.toFixed(2);
+        svg.appendChild(label);
     }
-
-    const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    title.setAttribute("x", 2);
-    title.setAttribute("y", 10);
-    title.setAttribute("font-size", "7");
-    title.textContent = "Cos sim";
-    svg.appendChild(title);
 }
 
 function patchToGridCoords(patch) {
@@ -533,6 +581,48 @@ function drawPolygonCoordinates(polygonCoords, svg) {
         svg.appendChild(path);
     });
 }
+async function switchCase(wsi) {
+    const response = await fetch("/select_case", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ wsi })
+    });
 
+    const selectedCase = await response.json();
+    renderCaseMeta(selectedCase);
+
+    // reload slide info
+    const slideInfo = await fetch("/slide_info").then(r => r.json());
+    slideWidth = slideInfo.width;
+    slideHeight = slideInfo.height;
+
+    // reload patches
+    allPatches = await fetch("/patches").then(r => r.json());
+
+    // reload annotation
+    try {
+        annotationGeoJSON = await fetch("/annotation").then(r => r.json());
+    } catch (e) {
+        annotationGeoJSON = null;
+    }
+
+    // reset local state
+    selectedPatchId = null;
+    if (selectedOverlay) {
+        try {
+            viewer.removeOverlay(selectedOverlay);
+        } catch (e) {}
+        selectedOverlay = null;
+    }
+
+    computeCoordBounds(allPatches);
+    renderPatchMap(allPatches, null, null);
+    redrawAnnotations();
+
+    // reopen OpenSeadragon tile source
+    viewer.open("/dzi");
+}
 
 init();
