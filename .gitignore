@@ -13,6 +13,7 @@ data/
 *.svs
 *.pt
 *.geojson
+*.zip
 
 # jupyter
 .ipynb_checkpoints/

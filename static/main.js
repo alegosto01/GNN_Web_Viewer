@@ -15,8 +15,6 @@ let uniqueX = [];
 let uniqueY = [];
 let xToCol = new Map();
 let yToRow = new Map();
-let currentMinScore = null;
-let currentMaxScore = null;
 let patchMapZoom = null;
 let annotationGeoJSON = null;
 let patchMapViewState = null;
@@ -24,6 +22,8 @@ let patchMapViewState = null;
 let allCases = [];
 const CELL_SIZE = 14;
 const CELL_GAP = 0;
+const SIMILARITY_MIN = -1;
+const SIMILARITY_MAX = 1;
 
 async function init() {
     allCases = await fetch("/cases").then(r => r.json());
@@ -74,7 +74,7 @@ async function init() {
     //     e.preventDefault();
     // }, { passive: false });
 
-    renderColorbar(null, null);
+    renderColorbar();
 
     window.addEventListener("resize", () => {
         renderPatchMap(allPatches, null, selectedPatchId);
@@ -121,18 +121,7 @@ function renderPatchMap(patches, scoreMap = null, selectedId = null) {
     svg.setAttribute("viewBox", `0 0 ${totalWidth} ${totalHeight}`);
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
 
-    const scores = scoreMap ? Array.from(scoreMap.values()) : null;
-    let minScore = null;
-    let maxScore = null;
-
-    if (scores && scores.length > 0) {
-        minScore = Math.min(...scores);
-        maxScore = Math.max(...scores);
-    }
-
-    currentMinScore = minScore;
-    currentMaxScore = maxScore;
-    renderColorbar(minScore, maxScore);
+    renderColorbar();
 
     patches.forEach(patch => {
         const { col, row } = patchToGridCoords(patch);
@@ -148,7 +137,7 @@ function renderPatchMap(patches, scoreMap = null, selectedId = null) {
 
         let fill = "#d9d9d9";
         if (scoreMap && scoreMap.has(patch.patch_id)) {
-            fill = similarityToViridis(scoreMap.get(patch.patch_id), minScore, maxScore);
+            fill = similarityToFixedScale(scoreMap.get(patch.patch_id));
         }
 
         rect.setAttribute("fill", fill);
@@ -383,24 +372,9 @@ function renderCaseMeta(meta) {
     `;
 }
 
-function similarityToViridis(value, minValue, maxValue) {
-    if (minValue === null || maxValue === null || maxValue <= minValue) {
-        return "rgb(68, 1, 84)";
-    }
-
-    let t = (value - minValue) / (maxValue - minValue);
-    t = Math.max(0, Math.min(1, t));
-
-    const anchors = [
-        [68, 1, 84],
-        [59, 82, 139],
-        [33, 145, 140],
-        [94, 201, 98],
-        [253, 231, 37]
-    ];
-
+function interpolateAnchors(t, anchors) {
     const n = anchors.length - 1;
-    const scaled = t * n;
+    const scaled = Math.max(0, Math.min(1, t)) * n;
     const i = Math.floor(scaled);
     const frac = Math.min(1, scaled - i);
 
@@ -415,11 +389,40 @@ function similarityToViridis(value, minValue, maxValue) {
     const r = Math.round(c0[0] + frac * (c1[0] - c0[0]));
     const g = Math.round(c0[1] + frac * (c1[1] - c0[1]));
     const b = Math.round(c0[2] + frac * (c1[2] - c0[2]));
-
     return `rgb(${r}, ${g}, ${b})`;
 }
 
-function renderColorbar(minScore, maxScore) {
+function colorFromPinkRamp(t) {
+    // Match the Python snippet:
+    // R=1.0, G: 0.08->0.80, B: 0.58->0.80
+    const clamped = Math.max(0, Math.min(1, t));
+    const r = 255;
+    const g = Math.round((0.08 + (0.80 - 0.08) * clamped) * 255);
+    const b = Math.round((0.58 + (0.80 - 0.58) * clamped) * 255);
+    return `rgb(${r}, ${g}, ${b})`;
+}
+
+function similarityToFixedScale(value) {
+    const v = Math.max(SIMILARITY_MIN, Math.min(SIMILARITY_MAX, value));
+
+    const viridisAnchors = [
+        [68, 1, 84],
+        [59, 82, 139],
+        [33, 145, 140],
+        [94, 201, 98],
+        [253, 231, 37]
+    ];
+
+    if (v < 0) {
+        const tNeg = (v - SIMILARITY_MIN) / (0 - SIMILARITY_MIN);
+        return colorFromPinkRamp(tNeg);
+    }
+
+    const tPos = (v - 0) / (SIMILARITY_MAX - 0);
+    return interpolateAnchors(tPos, viridisAnchors);
+}
+
+function renderColorbar() {
     const svg = document.getElementById("colorbar");
     svg.innerHTML = "";
 
@@ -443,20 +446,17 @@ function renderColorbar(minScore, maxScore) {
     gradient.setAttribute("x2", "100%");
     gradient.setAttribute("y2", "0%");
 
-    const stops = [
-        { offset: "0%", color: "rgb(68,1,84)" },
-        { offset: "25%", color: "rgb(59,82,139)" },
-        { offset: "50%", color: "rgb(33,145,140)" },
-        { offset: "75%", color: "rgb(94,201,98)" },
-        { offset: "100%", color: "rgb(253,231,37)" }
-    ];
-
-    stops.forEach(s => {
+    // Build the colorbar from sampled values so it follows the exact same mapping
+    // used for the patch colors (fixed scale, split at 0).
+    const nStops = 100;
+    for (let i = 0; i <= nStops; i++) {
+        const t = i / nStops;
+        const value = SIMILARITY_MIN + t * (SIMILARITY_MAX - SIMILARITY_MIN);
         const stop = document.createElementNS("http://www.w3.org/2000/svg", "stop");
-        stop.setAttribute("offset", s.offset);
-        stop.setAttribute("stop-color", s.color);
+        stop.setAttribute("offset", `${t * 100}%`);
+        stop.setAttribute("stop-color", similarityToFixedScale(value));
         gradient.appendChild(stop);
-    });
+    }
 
     defs.appendChild(gradient);
     svg.appendChild(defs);
@@ -476,17 +476,14 @@ function renderColorbar(minScore, maxScore) {
     title.setAttribute("y", 14);
     title.setAttribute("font-size", "14");
     title.setAttribute("font-weight", "600");
-    title.textContent = "Cosine similarity";
+    title.textContent = "Cosine similarity (fixed scale)";
     svg.appendChild(title);
 
-    if (minScore === null || maxScore === null) return;
+    const tickValues = [-1, -0.5, 0, 0.5, 1];
 
-    const ticks = 5;
-
-    for (let i = 0; i < ticks; i++) {
-        const t = i / (ticks - 1);
+    tickValues.forEach(value => {
+        const t = (value - SIMILARITY_MIN) / (SIMILARITY_MAX - SIMILARITY_MIN);
         const x = barX + t * barWidth;
-        const value = minScore + t * (maxScore - minScore);
 
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
         line.setAttribute("x1", x);
@@ -504,7 +501,7 @@ function renderColorbar(minScore, maxScore) {
         label.setAttribute("font-size", "12");
         label.textContent = value.toFixed(2);
         svg.appendChild(label);
-    }
+    });
 }
 
 function patchToGridCoords(patch) {
